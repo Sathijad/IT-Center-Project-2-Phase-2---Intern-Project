@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { createApp } from './app';
+import createApp from './app';
 import { createPool } from './lib/db';
 import { closePool } from './lib/db';
 import logger from './lib/logger';

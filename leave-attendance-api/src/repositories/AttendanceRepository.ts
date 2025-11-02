@@ -12,7 +12,7 @@ export class AttendanceRepository {
     const pool = getPool();
     let query = `
       SELECT al.*, au.email as user_email, 
-             au.first_name || ' ' || au.last_name as user_name
+             COALESCE(au.display_name, au.email) as user_name
       FROM attendance_logs al
       LEFT JOIN app_users au ON al.user_id = au.id
       WHERE 1=1

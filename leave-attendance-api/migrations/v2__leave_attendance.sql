@@ -15,14 +15,14 @@ CREATE TABLE IF NOT EXISTS leave_policies (
 -- Leave requests
 CREATE TABLE IF NOT EXISTS leave_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL,
+  user_id BIGINT NOT NULL,
   policy_id UUID NOT NULL REFERENCES leave_policies(id) ON DELETE RESTRICT,
   status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED')),
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
   half_day VARCHAR(2) CHECK (half_day IN ('AM', 'PM')),
   reason TEXT,
-  approved_by UUID,
+  approved_by BIGINT,
   approved_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_leave_requests_policy ON leave_requests(policy_id
 -- Leave balances
 CREATE TABLE IF NOT EXISTS leave_balances (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL,
+  user_id BIGINT NOT NULL,
   policy_id UUID NOT NULL REFERENCES leave_policies(id) ON DELETE RESTRICT,
   balance_days NUMERIC(5,2) NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -56,7 +56,7 @@ CREATE INDEX IF NOT EXISTS idx_leave_balances_policy ON leave_balances(policy_id
 -- Attendance logs
 CREATE TABLE IF NOT EXISTS attendance_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL,
+  user_id BIGINT NOT NULL,
   clock_in TIMESTAMPTZ NOT NULL,
   clock_out TIMESTAMPTZ,
   duration_minutes INTEGER,
@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS leave_audit (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   request_id UUID NOT NULL REFERENCES leave_requests(id) ON DELETE CASCADE,
   action VARCHAR(50) NOT NULL,
-  actor_id UUID NOT NULL,
+  actor_id BIGINT NOT NULL,
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -95,9 +95,19 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency_keys(created_at);
 
 -- Add foreign key constraints for user_id (assuming app_users table exists from Phase 1)
+-- Note: Using BIGINT to match Phase 1 app_users.id type
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'app_users') THEN
+    -- Drop existing constraints if they exist (in case of previous failed migration)
+    ALTER TABLE leave_requests DROP CONSTRAINT IF EXISTS fk_leave_request_user;
+    ALTER TABLE leave_requests DROP CONSTRAINT IF EXISTS fk_leave_requests_user;
+    ALTER TABLE leave_balances DROP CONSTRAINT IF EXISTS fk_leave_balances_user;
+    ALTER TABLE attendance_logs DROP CONSTRAINT IF EXISTS fk_attendance_logs_user;
+    ALTER TABLE leave_requests DROP CONSTRAINT IF EXISTS fk_leave_requests_approved_by;
+    ALTER TABLE leave_audit DROP CONSTRAINT IF EXISTS fk_leave_audit_actor;
+    
+    -- Add foreign key constraints
     ALTER TABLE leave_requests 
       ADD CONSTRAINT fk_leave_requests_user 
       FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE;

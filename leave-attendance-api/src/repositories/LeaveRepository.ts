@@ -78,8 +78,8 @@ export class LeaveRepository {
     const pool = getPool();
     let query = `
       SELECT lr.*, lp.type as policy_type, lp.max_days,
-             au.email as user_email, au.first_name || ' ' || au.last_name as user_name,
-             approver.email as approver_email, approver.first_name || ' ' || approver.last_name as approver_name
+             au.email as user_email, COALESCE(au.display_name, au.email) as user_name,
+             approver.email as approver_email, COALESCE(approver.display_name, approver.email) as approver_name
       FROM leave_requests lr
       JOIN leave_policies lp ON lr.policy_id = lp.id
       LEFT JOIN app_users au ON lr.user_id = au.id
@@ -141,9 +141,9 @@ export class LeaveRepository {
   async getRequestById(id: string): Promise<LeaveRequest | null> {
     const pool = getPool();
     const result = await pool.query<LeaveRequest>(
-      `SELECT lr.*, lp.type as policy_type, lp.max_days,
-              au.email as user_email, au.first_name || ' ' || au.last_name as user_name,
-              approver.email as approver_email, approver.first_name || ' ' || approver.last_name as approver_name
+      `      SELECT lr.*, lp.type as policy_type, lp.max_days,
+              au.email as user_email, COALESCE(au.display_name, au.email) as user_name,
+              approver.email as approver_email, COALESCE(approver.display_name, approver.email) as approver_name
        FROM leave_requests lr
        JOIN leave_policies lp ON lr.policy_id = lp.id
        LEFT JOIN app_users au ON lr.user_id = au.id
