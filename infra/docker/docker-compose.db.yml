@@ -1,0 +1,79 @@
+# ============================================================================
+# Phase 2 Database Configuration - Using Phase 1 Database
+# ============================================================================
+# This compose file is configured to use the EXISTING Phase 1 database container.
+# The itcenter_pg service is commented out to avoid container name conflicts.
+#
+# IMPORTANT: Before using Phase 2, ensure Phase 1 database is running:
+#   docker ps --filter "name=itcenter_pg"
+#   # If not running: docker start itcenter_pg
+#
+# Connection Details (same as Phase 1):
+#   - Host: localhost (or host.docker.internal if backend runs in Docker)
+#   - Port: 5432
+#   - Database: itcenter_auth
+#   - Username: itcenter
+#   - Password: password
+#
+# If you need a standalone database (Phase 1 doesn't exist), use:
+#   docker-compose.db.yml.standalone
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # ==========================================================================
+  # Phase 1 Database Service (DISABLED - Use existing Phase 1 container)
+  # ==========================================================================
+  # The database from Phase 1 should already be running.
+  # If you need to create a new database, uncomment this section or use
+  # docker-compose.db.yml.standalone
+  #
+  # itcenter_pg:
+  #   image: postgres:15-alpine
+  #   container_name: itcenter_pg
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: itcenter_auth
+  #     POSTGRES_USER: itcenter
+  #     POSTGRES_PASSWORD: password
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U itcenter -d itcenter_auth"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # ==========================================================================
+  # pgAdmin (Optional - For database management)
+  # ==========================================================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: itcenter_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@itcenter.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_LISTEN_PORT: 80
+    ports:
+      - "5050:80"
+    # Note: depends_on removed since we're using external Phase 1 DB
+    # Connect manually in pgAdmin UI using:
+    #   Host: itcenter_pg (if on same network) or host.docker.internal
+    #   Port: 5432
+    #   Database: itcenter_auth
+    #   Username: itcenter
+    #   Password: password
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+volumes:
+  # Note: pgdata volume not needed since using Phase 1 DB
+  # pgdata:
+  #   driver: local
+  pgadmin_data:
+    driver: local
+

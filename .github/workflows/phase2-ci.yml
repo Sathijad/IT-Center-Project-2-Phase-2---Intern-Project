@@ -1,0 +1,323 @@
+name: Phase 2 CI/CD
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+env:
+  NODE_VERSION: '18.x'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Lint and validate code
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: leave-attendance-api/package.json
+      
+      - name: Install dependencies
+        working-directory: ./leave-attendance-api
+        run: npm ci
+      
+      - name: Run ESLint
+        working-directory: ./leave-attendance-api
+        run: npm run lint
+      
+      - name: Setup Node.js (React)
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: admin-web-react/package.json
+      
+      - name: Install dependencies (React)
+        working-directory: ./admin-web-react
+        run: npm ci
+      
+      - name: Run ESLint (React)
+        working-directory: ./admin-web-react
+        run: npm run lint
+
+  # Backend tests
+  test-backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: itcenter_auth_test
+          POSTGRES_USER: itcenter
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: leave-attendance-api/package.json
+      
+      - name: Install dependencies
+        working-directory: ./leave-attendance-api
+        run: npm ci
+      
+      - name: Run migrations
+        working-directory: ./leave-attendance-api
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: itcenter_auth_test
+          DB_USER: itcenter
+          DB_PASSWORD: password
+        run: |
+          npm run migrate:up
+          npm run seed
+      
+      - name: Run unit tests
+        working-directory: ./leave-attendance-api
+        run: npm run test:unit -- --coverage
+      
+      - name: Run API tests
+        working-directory: ./leave-attendance-api
+        run: npm run test:api
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          directory: ./leave-attendance-api/coverage
+          flags: backend
+
+  # Frontend tests
+  test-frontend:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: admin-web-react/package.json
+      
+      - name: Install dependencies
+        working-directory: ./admin-web-react
+        run: npm ci
+        # Note: Need to add uuid after this step in real deployment
+      
+      - name: Run tests
+        working-directory: ./admin-web-react
+        run: npm run test -- --coverage
+      
+      - name: Build
+        working-directory: ./admin-web-react
+        run: npm run build
+
+  # Security scanning
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run npm audit
+        working-directory: ./leave-attendance-api
+        run: npm audit --audit-level=moderate || true
+      
+      - name: Run npm audit (React)
+        working-directory: ./admin-web-react
+        run: npm audit --audit-level=moderate || true
+
+  # Build backend
+  build-backend:
+    name: Build Backend
+    runs-on: ubuntu-latest
+    needs: [lint, test-backend]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: leave-attendance-api/package.json
+      
+      - name: Install dependencies
+        working-directory: ./leave-attendance-api
+        run: npm ci
+      
+      - name: Build
+        working-directory: ./leave-attendance-api
+        run: npm run build
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-build
+          path: leave-attendance-api/dist
+          retention-days: 7
+
+  # Build frontend
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    needs: [lint, test-frontend]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: admin-web-react/package.json
+      
+      - name: Install dependencies
+        working-directory: ./admin-web-react
+        run: npm ci
+      
+      - name: Build
+        working-directory: ./admin-web-react
+        run: npm run build
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-build
+          path: admin-web-react/dist
+          retention-days: 7
+
+  # Deploy to DEV (on push to develop)
+  deploy-dev:
+    name: Deploy to DEV
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend, security-scan]
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: development
+      url: https://dev-api.itcenter.local
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-2
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+      
+      - name: Terraform Init
+        working-directory: ./infra/terraform/leave-attendance
+        run: terraform init
+      
+      - name: Terraform Plan
+        working-directory: ./infra/terraform/leave-attendance
+        run: terraform plan -var="environment=dev" -out=tfplan
+      
+      - name: Terraform Apply
+        if: github.event_name != 'pull_request'
+        working-directory: ./infra/terraform/leave-attendance
+        run: terraform apply -auto-approve tfplan
+
+  # Deploy to STAGING (on push to main)
+  deploy-staging:
+    name: Deploy to STAGING
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend, security-scan]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: staging
+      url: https://stg-api.itcenter.local
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-2
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+      
+      - name: Terraform Init
+        working-directory: ./infra/terraform/leave-attendance
+        run: terraform init
+      
+      - name: Terraform Plan
+        working-directory: ./infra/terraform/leave-attendance
+        run: terraform plan -var="environment=stg" -out=tfplan
+      
+      - name: Terraform Apply
+        if: github.event_name != 'pull_request'
+        working-directory: ./infra/terraform/leave-attendance
+        run: terraform apply -auto-approve tfplan
+
+  # Deploy to PRODUCTION (manual approval required)
+  deploy-production:
+    name: Deploy to PRODUCTION
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://api.itcenter.local
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-2
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+      
+      - name: Terraform Init
+        working-directory: ./infra/terraform/leave-attendance
+        run: terraform init
+      
+      - name: Terraform Plan
+        working-directory: ./infra/terraform/leave-attendance
+        run: terraform plan -var="environment=prd" -out=tfplan
+      
+      - name: Terraform Apply
+        working-directory: ./infra/terraform/leave-attendance
+        run: terraform apply -auto-approve tfplan
+

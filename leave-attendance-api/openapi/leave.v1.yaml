@@ -1,0 +1,632 @@
+openapi: 3.0.3
+info:
+  title: Leave & Attendance Management API
+  description: IT Center Phase 2 - Staff Leave & Attendance Management System
+  version: 2.0.0-phase2
+  contact:
+    name: IT Center Team
+
+servers:
+  - url: http://localhost:8082/api/v1
+    description: Local development
+  - url: https://api.itcenter.local/api/v1
+    description: Production
+
+security:
+  - bearerAuth: []
+
+paths:
+  /leave/balance:
+    get:
+      summary: Get leave balances
+      description: Retrieve leave balances for a user. EMPLOYEE can view own, ADMIN can view any.
+      operationId: getBalance
+      tags:
+        - Leave
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: User ID to get balances for
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LeaveBalance'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /leave/requests:
+    get:
+      summary: List leave requests
+      description: List leave requests with filters. EMPLOYEE sees own, ADMIN sees all.
+      operationId: listRequests
+      tags:
+        - Leave
+      parameters:
+        - name: user_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Success
+          headers:
+            X-Total-Count:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse'
+    post:
+      summary: Create leave request
+      description: Create a new leave request. Requires idempotency key header.
+      operationId: createRequest
+      tags:
+        - Leave
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLeaveRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/LeaveRequest'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /leave/requests/{id}:
+    patch:
+      summary: Update leave request status
+      description: Approve, reject, or cancel a leave request. ADMIN only.
+      operationId: updateRequest
+      tags:
+        - Leave
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [APPROVED, REJECTED, CANCELLED]
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /attendance:
+    get:
+      summary: List attendance logs
+      description: Get attendance logs with filters. EMPLOYEE sees own, ADMIN sees all.
+      operationId: listLogs
+      tags:
+        - Attendance
+      parameters:
+        - name: user_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Success
+          headers:
+            X-Total-Count:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse'
+
+  /attendance/today:
+    get:
+      summary: Get today's attendance status
+      description: Get current clock-in status for today
+      operationId: getTodayStatus
+      tags:
+        - Attendance
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        enum: [NOT_STARTED, CLOCKED_IN, CLOCKED_OUT]
+                      log:
+                        $ref: '#/components/schemas/AttendanceLog'
+
+  /attendance/clock-in:
+    post:
+      summary: Clock in
+      description: Record clock-in with optional geolocation. Requires idempotency key.
+      operationId: clockIn
+      tags:
+        - Attendance
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lat:
+                  type: number
+                  format: float
+                lng:
+                  type: number
+                  format: float
+                source:
+                  type: string
+                  enum: [MOBILE, WEB, ADMIN]
+                  default: MOBILE
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AttendanceLog'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /attendance/clock-out:
+    post:
+      summary: Clock out
+      description: Record clock-out and calculate duration
+      operationId: clockOut
+      tags:
+        - Attendance
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /integrations/msgraph/sync:
+    post:
+      summary: Sync calendar to Microsoft Graph
+      description: Create calendar block for approved leave. ADMIN only.
+      operationId: syncCalendar
+      tags:
+        - Integrations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+                - start_date
+                - end_date
+                - reason
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+                start_date:
+                  type: string
+                  format: date
+                end_date:
+                  type: string
+                  format: date
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Success
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /reports/leave-summary:
+    get:
+      summary: Get leave summary report
+      description: Generate team leave summary with statistics. ADMIN only.
+      operationId: getLeaveSummary
+      tags:
+        - Reports
+      parameters:
+        - name: range
+          in: query
+          schema:
+            type: string
+            default: '30'
+          description: Number of days to include in report
+        - name: team_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      totalRequests:
+                        type: integer
+                      approvedCount:
+                        type: integer
+                      rejectedCount:
+                        type: integer
+                      pendingCount:
+                        type: integer
+                      totalDays:
+                        type: number
+                      approvalRate:
+                        type: number
+                      ranges:
+                        type: array
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /healthz:
+    get:
+      summary: Health check
+      description: Simple health check with no dependencies
+      operationId: healthCheck
+      tags:
+        - System
+      security: []
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  timestamp:
+                    type: string
+                  service:
+                    type: string
+
+  /readyz:
+    get:
+      summary: Readiness check
+      description: Check if service is ready (DB, JWKS connectivity)
+      operationId: readinessCheck
+      tags:
+        - System
+      security: []
+      responses:
+        '200':
+          description: Ready
+        '503':
+          description: Not ready
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: AWS Cognito JWT token
+
+  schemas:
+    LeaveBalance:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        policyId:
+          type: string
+          format: uuid
+        balanceDays:
+          type: number
+          format: float
+        updatedAt:
+          type: string
+          format: date-time
+
+    LeaveRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        policyId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        halfDay:
+          type: string
+          enum: [AM, PM]
+        reason:
+          type: string
+        approvedBy:
+          type: string
+          format: uuid
+        approvedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateLeaveRequest:
+      type: object
+      required:
+        - policy_id
+        - start_date
+        - end_date
+      properties:
+        policy_id:
+          type: string
+          format: uuid
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        half_day:
+          type: string
+          enum: [AM, PM]
+        reason:
+          type: string
+
+    AttendanceLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        clockIn:
+          type: string
+          format: date-time
+        clockOut:
+          type: string
+          format: date-time
+        durationMinutes:
+          type: integer
+        lat:
+          type: number
+          format: float
+        lng:
+          type: number
+          format: float
+        source:
+          type: string
+          enum: [MOBILE, WEB, ADMIN]
+        createdAt:
+          type: string
+          format: date-time
+
+    PaginatedResponse:
+      type: object
+      properties:
+        data:
+          type: array
+        total:
+          type: integer
+        page:
+          type: integer
+        size:
+          type: integer
+        totalPages:
+          type: integer
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+        timestamp:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            LEAVE_OVERLAP:
+              value:
+                code: LEAVE_OVERLAP
+                message: Leave request overlaps with an existing approved or pending request
+                timestamp: '2025-11-02T10:00:00Z'
+            INSUFFICIENT_BALANCE:
+              value:
+                code: INSUFFICIENT_BALANCE
+                message: Insufficient leave balance
+                timestamp: '2025-11-02T10:00:00Z'
+            GEO_OUT_OF_RANGE:
+              value:
+                code: GEO_OUT_OF_RANGE
+                message: Location is outside the allowed area
+                timestamp: '2025-11-02T10:00:00Z'
+            ALREADY_CLOCKED_IN:
+              value:
+                code: ALREADY_CLOCKED_IN
+                message: Already clocked in today
+                timestamp: '2025-11-02T10:00:00Z'
+
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
